@@ -76,7 +76,6 @@ vi.mock('vue-i18n', async () => {
     })
   }
 })
-
 const DataTableStub = {
   props: ['columns', 'data'],
   template: `
