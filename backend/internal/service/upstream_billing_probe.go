@@ -662,12 +662,12 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 		proxyURL = account.Proxy.URL()
 	}
 	endpoint := "/user/balance"
-	if template == upstreamBillingProbeTemplateNewAPI {
+	if template == UpstreamBillingProbeTemplateNewAPI {
 		endpoint = "/api/user/self"
 	} else if template == upstreamBillingProbeTemplateLegacy {
 		endpoint = "/v1/sub2api/billing"
 	}
-	if template == upstreamBillingProbeTemplateNewAPI {
+	if template == UpstreamBillingProbeTemplateNewAPI {
 		userID, _ := account.Extra[UpstreamBillingProbeUserIDExtraKey].(string)
 		if strings.TrimSpace(userID) == "" {
 			return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "missing_user_id", 0)
@@ -692,7 +692,7 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 	req = req.WithContext(WithHTTPUpstreamRedirectsDisabled(reqCtx))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	if template == upstreamBillingProbeTemplateNewAPI {
+	if template == UpstreamBillingProbeTemplateNewAPI {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", "cc-switch/1.0")
 		userID, _ := account.Extra[UpstreamBillingProbeUserIDExtraKey].(string)
@@ -914,7 +914,7 @@ func parseUpstreamBillingProbeResponseForTemplate(body []byte, template string) 
 	if template == upstreamBillingProbeTemplateLegacy {
 		return parseUpstreamBillingProbeResponse(body)
 	}
-	if template == upstreamBillingProbeTemplateNewAPI {
+	if template == UpstreamBillingProbeTemplateNewAPI {
 		return parseNewAPIProbeResponse(body)
 	}
 	var envelope struct {
