@@ -662,9 +662,10 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 		proxyURL = account.Proxy.URL()
 	}
 	endpoint := "/user/balance"
-	if template == UpstreamBillingProbeTemplateNewAPI {
+	switch template {
+	case UpstreamBillingProbeTemplateNewAPI:
 		endpoint = "/api/user/self"
-	} else if template == upstreamBillingProbeTemplateLegacy {
+	case upstreamBillingProbeTemplateLegacy:
 		endpoint = "/v1/sub2api/billing"
 	}
 	if template == UpstreamBillingProbeTemplateNewAPI {
@@ -692,12 +693,13 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 	req = req.WithContext(WithHTTPUpstreamRedirectsDisabled(reqCtx))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	if template == UpstreamBillingProbeTemplateNewAPI {
+	switch template {
+	case UpstreamBillingProbeTemplateNewAPI:
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", "cc-switch/1.0")
 		userID, _ := account.Extra[UpstreamBillingProbeUserIDExtraKey].(string)
 		req.Header.Set("New-Api-User", strings.TrimSpace(userID))
-	} else if template == UpstreamBillingProbeTemplateGeneral {
+	case UpstreamBillingProbeTemplateGeneral:
 		req.Header.Set("User-Agent", "cc-switch/1.0")
 	}
 	account.ApplyHeaderOverrides(req.Header)
@@ -928,12 +930,12 @@ func parseUpstreamBillingProbeResponseForTemplate(body []byte, template string) 
 
 func parseGeneralProbeResponse(body []byte) (map[string]any, error) {
 	var response struct {
-		Balance    *float64 `json:"balance"`
-		Remaining  *float64 `json:"remaining"`
-		Used       *float64 `json:"used"`
-		Total      *float64 `json:"total"`
-		Unit       string   `json:"unit"`
-		IsActive   *bool    `json:"is_active"`
+		Balance   *float64 `json:"balance"`
+		Remaining *float64 `json:"remaining"`
+		Used      *float64 `json:"used"`
+		Total     *float64 `json:"total"`
+		Unit      string   `json:"unit"`
+		IsActive  *bool    `json:"is_active"`
 	}
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, err
@@ -974,9 +976,9 @@ func parseGeneralProbeResponse(body []byte) (map[string]any, error) {
 
 func parseNewAPIProbeResponse(body []byte) (map[string]any, error) {
 	var response struct {
-		Success *bool `json:"success"`
+		Success *bool  `json:"success"`
 		Message string `json:"message"`
-		Data *struct {
+		Data    *struct {
 			Group     string   `json:"group"`
 			Quota     *float64 `json:"quota"`
 			UsedQuota *float64 `json:"used_quota"`
