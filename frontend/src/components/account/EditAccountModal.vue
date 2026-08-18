@@ -1771,20 +1771,46 @@
 
       <div
         v-if="account?.type === 'apikey'"
-        class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+        class="space-y-4 border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div>
-          <label class="input-label mb-0">{{ t('admin.accounts.upstreamBilling.autoProbe') }}</label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.upstreamBilling.autoProbeHint') }}
-          </p>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <label class="input-label mb-0">{{ t('admin.accounts.upstreamBilling.autoProbe') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.upstreamBilling.autoProbeHint') }}
+              </p>
+            </div>
+            <Toggle
+              :model-value="upstreamBillingAutoProbeEnabled"
+              data-testid="upstream-billing-auto-probe"
+              :aria-label="t('admin.accounts.upstreamBilling.autoProbe')"
+              @update:model-value="handleUpstreamBillingAutoProbeChange"
+            />
+          </div>
+          <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label class="input-label">{{ t('admin.accounts.upstreamBilling.template') }}</label>
+              <Select
+                v-model="upstreamBillingProbeTemplate"
+                :options="upstreamBillingProbeTemplateOptions"
+                data-testid="upstream-billing-template"
+              />
+            </div>
+            <div v-if="upstreamBillingProbeTemplate === 'newapi'">
+              <label class="input-label">{{ t('admin.accounts.upstreamBilling.userId') }}</label>
+              <input
+                v-model.trim="upstreamBillingProbeUserID"
+                type="text"
+                inputmode="numeric"
+                class="input"
+                :placeholder="t('admin.accounts.upstreamBilling.userIdPlaceholder')"
+                data-testid="upstream-billing-user-id"
+              />
+              <p class="input-hint">{{ t('admin.accounts.upstreamBilling.userIdHint') }}</p>
+            </div>
+          </div>
         </div>
-        <Toggle
-          :model-value="upstreamBillingAutoProbeEnabled"
-          data-testid="upstream-billing-auto-probe"
-          :aria-label="t('admin.accounts.upstreamBilling.autoProbe')"
-          @update:model-value="handleUpstreamBillingAutoProbeChange"
-        />
       </div>
 
       <OllamaCloudUsageSettings
@@ -3038,6 +3064,8 @@ const autoPause5hDisabled = ref(false)
 const autoPause7dDisabled = ref(false)
 const upstreamBillingAutoProbeEnabled = ref(false)
 const upstreamBillingRateSyncEnabled = ref(false)
+const upstreamBillingProbeTemplate = ref<'general' | 'newapi'>('general')
+const upstreamBillingProbeUserID = ref('')
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
 const antigravityProjectId = ref('')
@@ -3445,6 +3473,11 @@ const handleUpstreamBillingAutoProbeChange = (enabled: boolean) => {
   }
 }
 
+const upstreamBillingProbeTemplateOptions = computed(() => [
+  { value: 'general', label: t('admin.accounts.upstreamBilling.templateGeneral') },
+  { value: 'newapi', label: t('admin.accounts.upstreamBilling.templateNewAPI') }
+])
+
 const statusOptions = computed(() => {
   const options = [
     { value: 'active', label: t('common.active') },
@@ -3565,8 +3598,12 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 	autoPause5hDisabled.value = extra?.auto_pause_5h_disabled === true
 	autoPause7dDisabled.value = extra?.auto_pause_7d_disabled === true
 	upstreamBillingAutoProbeEnabled.value = extra?.upstream_billing_probe_enabled === true
-  upstreamBillingRateSyncEnabled.value =
+	upstreamBillingRateSyncEnabled.value =
     upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_rate_sync_enabled === true
+	upstreamBillingProbeTemplate.value = extra?.upstream_billing_probe_template === 'newapi' ? 'newapi' : 'general'
+	upstreamBillingProbeUserID.value = typeof extra?.upstream_billing_probe_user_id === 'string'
+	  ? extra.upstream_billing_probe_user_id
+	  : ''
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
   openaiPassthroughEnabled.value = false
@@ -5029,6 +5066,12 @@ const handleSubmit = async () => {
       if (props.account.type === 'apikey') {
         delete newExtra.upstream_billing_probe_enabled
         delete newExtra.upstream_billing_rate_sync_enabled
+        newExtra.upstream_billing_probe_template = upstreamBillingProbeTemplate.value
+        if (upstreamBillingProbeTemplate.value === 'newapi' && upstreamBillingProbeUserID.value.trim() !== '') {
+          newExtra.upstream_billing_probe_user_id = upstreamBillingProbeUserID.value.trim()
+        } else {
+          delete newExtra.upstream_billing_probe_user_id
+        }
       }
       // Total quota
       if (editQuotaLimit.value != null && editQuotaLimit.value > 0) {

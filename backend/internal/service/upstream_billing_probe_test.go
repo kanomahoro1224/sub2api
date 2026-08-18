@@ -340,6 +340,93 @@ func TestUpstreamBillingProbeSuccessPersistsSanitizedSnapshot(t *testing.T) {
 	require.Equal(t, snapshot.Status, persisted.Status)
 }
 
+func TestUpstreamBillingProbeNewAPIUsesCCSwitchPreset(t *testing.T) {
+	account := &Account{
+		ID:          19,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "newapi-access-token", "base_url": "https://newapi.example"},
+		Extra: map[string]any{
+			UpstreamBillingProbeEnabledExtraKey:  true,
+			UpstreamBillingProbeTemplateExtraKey: UpstreamBillingProbeTemplateNewAPI,
+			UpstreamBillingProbeUserIDExtraKey:   "114514",
+		},
+	}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"success":true,"data":{"id":114514,"group":"pro","quota":1000000,"used_quota":250000}}`)),
+	}}
+	svc := newUpstreamBillingProbeTestService(repo, upstream, &upstreamBillingProbeSettingRepo{})
+	snapshot, err := svc.ProbeAccount(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.Equal(t, UpstreamBillingProbeStatusOK, snapshot.Status)
+	require.Equal(t, UpstreamBillingProbeTemplateNewAPI, snapshot.Data["template"])
+	require.Equal(t, 2.0, snapshot.Data["remaining"])
+	require.Equal(t, 0.5, snapshot.Data["used"])
+	require.Equal(t, 2.5, snapshot.Data["total"])
+	require.Equal(t, "USD", snapshot.Data["unit"])
+	require.Equal(t, "https://newapi.example/api/user/self", upstream.lastReq.URL.String())
+	require.Equal(t, "Bearer newapi-access-token", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, "114514", upstream.lastReq.Header.Get("New-Api-User"))
+	require.Equal(t, "cc-switch/1.0", upstream.lastReq.Header.Get("User-Agent"))
+}
+
+func TestParseGeneralProbeResponseUsesCCSwitchBalanceShape(t *testing.T) {
+	data, err := parseGeneralProbeResponse([]byte(`{"balance":12.5,"is_active":true}`))
+	require.NoError(t, err)
+	require.Equal(t, UpstreamBillingProbeTemplateGeneral, data["template"])
+	require.Equal(t, 12.5, data["remaining"])
+	require.Equal(t, "USD", data["unit"])
+}
+
+func TestUpstreamBillingProbeNewAPIRequiresUserID(t *testing.T) {
+	account := &Account{
+		ID:          20,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Credentials: map[string]any{"api_key": "newapi-access-token", "base_url": "https://newapi.example"},
+		Extra: map[string]any{
+			UpstreamBillingProbeEnabledExtraKey:  true,
+			UpstreamBillingProbeTemplateExtraKey: UpstreamBillingProbeTemplateNewAPI,
+		},
+	}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`))}}
+	svc := newUpstreamBillingProbeTestService(repo, upstream, &upstreamBillingProbeSettingRepo{})
+	snapshot, err := svc.ProbeAccount(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.Equal(t, UpstreamBillingProbeStatusFailed, snapshot.Status)
+	require.Equal(t, "missing_user_id", snapshot.LastError)
+	require.Nil(t, upstream.lastReq)
+}
+
+func TestUpstreamBillingProbeNewAPIRejectsUnsafeUserID(t *testing.T) {
+	account := &Account{
+		ID:          21,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Credentials: map[string]any{"api_key": "newapi-access-token", "base_url": "https://newapi.example"},
+		Extra: map[string]any{
+			UpstreamBillingProbeEnabledExtraKey:  true,
+			UpstreamBillingProbeTemplateExtraKey: UpstreamBillingProbeTemplateNewAPI,
+			UpstreamBillingProbeUserIDExtraKey:   "114514\nX-Injected: yes",
+		},
+	}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`))}}
+	svc := newUpstreamBillingProbeTestService(repo, upstream, &upstreamBillingProbeSettingRepo{})
+	snapshot, err := svc.ProbeAccount(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.Equal(t, "invalid_user_id", snapshot.LastError)
+	require.Nil(t, upstream.lastReq)
+}
+
 func TestUpstreamBillingProbeSyncsResolvedRateForAllAPIKeyPlatforms(t *testing.T) {
 	for _, platform := range []string{
 		PlatformOpenAI,

@@ -1151,6 +1151,12 @@ func upstreamBillingProbeIdentity(account *Account) map[string]any {
 			identity[key] = value
 		}
 	}
+	identity[UpstreamBillingProbeTemplateExtraKey] = upstreamBillingProbeTemplate(account)
+	if account.Extra != nil {
+		if value, ok := account.Extra[UpstreamBillingProbeUserIDExtraKey]; ok {
+			identity[UpstreamBillingProbeUserIDExtraKey] = value
+		}
+	}
 	return identity
 }
 

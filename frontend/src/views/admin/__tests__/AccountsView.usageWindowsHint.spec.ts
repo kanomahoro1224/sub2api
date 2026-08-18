@@ -206,6 +206,18 @@ describe('admin AccountsView usage windows hint', () => {
     expect(columns.find(column => column.key === 'upstream_billing_rate')?.sortable).toBe(true)
   })
 
+  it('hides the upstream billing column when the global probe is disabled', async () => {
+    const getSettings = (await import('@/api/admin')).adminAPI.accounts.getUpstreamBillingProbeSettings as ReturnType<typeof vi.fn>
+    getSettings.mockResolvedValueOnce({ enabled: false, interval_minutes: 30 })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const columns = wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string }>
+    expect(columns.some(column => column.key === 'upstream_billing_rate')).toBe(false)
+    expect(wrapper.find('[data-test="upstream-billing-header"]').exists()).toBe(false)
+  })
+
   it('shows account multipliers with enough precision to match declared rates', async () => {
     listAccounts.mockResolvedValueOnce({
       items: [{

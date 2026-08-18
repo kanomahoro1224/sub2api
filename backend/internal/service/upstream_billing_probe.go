@@ -32,6 +32,8 @@ const (
 	UpstreamBillingProbeExtraKey           = "upstream_billing_probe"
 	UpstreamBillingProbeEnabledExtraKey    = "upstream_billing_probe_enabled"
 	UpstreamBillingRateSyncEnabledExtraKey = "upstream_billing_rate_sync_enabled"
+	UpstreamBillingProbeTemplateExtraKey   = "upstream_billing_probe_template"
+	UpstreamBillingProbeUserIDExtraKey     = "upstream_billing_probe_user_id"
 
 	upstreamBillingProbeDefaultIntervalMinutes = 30
 	upstreamBillingProbeMinIntervalMinutes     = 5
@@ -49,6 +51,12 @@ const (
 	upstreamBillingProbeAccountRateScale       = 10000.0
 	upstreamBillingProbeLeaderLockKey          = "upstream:billing:probe:leader"
 	upstreamBillingProbeLeaderLockTTL          = 2 * time.Minute
+)
+
+const (
+	UpstreamBillingProbeTemplateGeneral = "general"
+	UpstreamBillingProbeTemplateNewAPI  = "newapi"
+	upstreamBillingProbeTemplateLegacy  = "legacy"
 )
 
 // UpstreamBillingProbeMaxBatchSize limits one manual batch and one runner cycle.
@@ -145,7 +153,7 @@ func BuildUpstreamBillingRateSnapshotItems(accounts []Account) []UpstreamBilling
 	items := make([]UpstreamBillingRateSnapshotItem, 0, len(accounts))
 	for _, account := range accounts {
 		var snapshot *UpstreamBillingProbeSnapshot
-		if account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey {
+		if account.Type == AccountTypeAPIKey {
 			snapshot = decodeUpstreamBillingProbeSnapshot(account.Extra)
 		}
 		items = append(items, UpstreamBillingRateSnapshotItem{
@@ -625,13 +633,14 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 	if apiKey == "" {
 		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "missing_api_key", 0)
 	}
+	template := upstreamBillingProbeTemplate(account)
 	baseURL := account.GetCredential("base_url")
 	if account.Platform == PlatformOpenAI {
 		if baseURL == "" {
 			// 保持官方语义：OpenAI 账号无自定义 base 时探官方域（404 → unsupported）。
 			baseURL = "https://api.openai.com"
 		}
-	} else if upstreamBillingProbeTargetIsOfficialAPI(baseURL) {
+	} else if template == upstreamBillingProbeTemplateLegacy && upstreamBillingProbeTargetIsOfficialAPI(baseURL) {
 		// 其他平台 base_url 为空或指向官方 API 根域（前端创建时会把空值
 		// 填成官方默认域，且提供 us-east-1.api.x.ai 等官方区域预设）⇒
 		// 必无 /v1/sub2api/billing；不发请求，直接记 unsupported，避免
@@ -652,7 +661,22 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 		}
 		proxyURL = account.Proxy.URL()
 	}
-	probeURL := buildOpenAIEndpointURL(normalizedBaseURL, "/v1/sub2api/billing")
+	endpoint := "/user/balance"
+	if template == upstreamBillingProbeTemplateNewAPI {
+		endpoint = "/api/user/self"
+	} else if template == upstreamBillingProbeTemplateLegacy {
+		endpoint = "/v1/sub2api/billing"
+	}
+	if template == upstreamBillingProbeTemplateNewAPI {
+		userID, _ := account.Extra[UpstreamBillingProbeUserIDExtraKey].(string)
+		if strings.TrimSpace(userID) == "" {
+			return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "missing_user_id", 0)
+		}
+		if strings.ContainsAny(userID, "\r\n") || len(userID) > 128 {
+			return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "invalid_user_id", 0)
+		}
+	}
+	probeURL := buildOpenAIEndpointURL(normalizedBaseURL, endpoint)
 	probeCtx, cancel := context.WithTimeout(ctx, upstreamBillingProbeRequestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, probeURL, bytes.NewReader(nil))
@@ -668,6 +692,14 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 	req = req.WithContext(WithHTTPUpstreamRedirectsDisabled(reqCtx))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
+	if template == upstreamBillingProbeTemplateNewAPI {
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "cc-switch/1.0")
+		userID, _ := account.Extra[UpstreamBillingProbeUserIDExtraKey].(string)
+		req.Header.Set("New-Api-User", strings.TrimSpace(userID))
+	} else if template == UpstreamBillingProbeTemplateGeneral {
+		req.Header.Set("User-Agent", "cc-switch/1.0")
+	}
 	account.ApplyHeaderOverrides(req.Header)
 	var tlsProfile *tlsfingerprint.Profile
 	if s.accountTestService.tlsFPProfileService != nil {
@@ -694,7 +726,7 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return s.persistProbeFailure(ctx, account, intervalMinutes, now, resp.StatusCode, "http_error", retryAfter(resp.Header, now))
 	}
-	data, err := parseUpstreamBillingProbeResponse(body)
+	data, err := parseUpstreamBillingProbeResponseForTemplate(body, template)
 	if err != nil {
 		return s.persistProbeFailure(ctx, account, intervalMinutes, now, resp.StatusCode, "invalid_response", retryAfter(resp.Header, now))
 	}
@@ -876,6 +908,113 @@ func parseUpstreamBillingProbeResponse(body []byte) (map[string]any, error) {
 		return nil, fmt.Errorf("inconsistent effective billing multiplier")
 	}
 	return data, nil
+}
+
+func parseUpstreamBillingProbeResponseForTemplate(body []byte, template string) (map[string]any, error) {
+	if template == upstreamBillingProbeTemplateLegacy {
+		return parseUpstreamBillingProbeResponse(body)
+	}
+	if template == upstreamBillingProbeTemplateNewAPI {
+		return parseNewAPIProbeResponse(body)
+	}
+	var envelope struct {
+		Object string `json:"object"`
+	}
+	if err := json.Unmarshal(body, &envelope); err == nil && envelope.Object == "sub2api.key_billing" {
+		return parseUpstreamBillingProbeResponse(body)
+	}
+	return parseGeneralProbeResponse(body)
+}
+
+func parseGeneralProbeResponse(body []byte) (map[string]any, error) {
+	var response struct {
+		Balance    *float64 `json:"balance"`
+		Remaining  *float64 `json:"remaining"`
+		Used       *float64 `json:"used"`
+		Total      *float64 `json:"total"`
+		Unit       string   `json:"unit"`
+		IsActive   *bool    `json:"is_active"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, err
+	}
+	remaining := response.Remaining
+	if remaining == nil {
+		remaining = response.Balance
+	}
+	if remaining == nil || !validProbeNumber(*remaining) {
+		return nil, fmt.Errorf("missing balance")
+	}
+	if response.Used != nil && !validProbeNumber(*response.Used) {
+		return nil, fmt.Errorf("invalid used balance")
+	}
+	if response.Total != nil && !validProbeNumber(*response.Total) {
+		return nil, fmt.Errorf("invalid total balance")
+	}
+	unit := strings.TrimSpace(response.Unit)
+	if unit == "" {
+		unit = "USD"
+	}
+	data := map[string]any{
+		"template":  UpstreamBillingProbeTemplateGeneral,
+		"remaining": *remaining,
+		"unit":      unit,
+	}
+	if response.Used != nil {
+		data["used"] = *response.Used
+	}
+	if response.Total != nil {
+		data["total"] = *response.Total
+	}
+	if response.IsActive != nil {
+		data["is_active"] = *response.IsActive
+	}
+	return data, nil
+}
+
+func parseNewAPIProbeResponse(body []byte) (map[string]any, error) {
+	var response struct {
+		Success *bool `json:"success"`
+		Message string `json:"message"`
+		Data *struct {
+			Group     string   `json:"group"`
+			Quota     *float64 `json:"quota"`
+			UsedQuota *float64 `json:"used_quota"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, err
+	}
+	if response.Success == nil || !*response.Success || response.Data == nil || response.Data.Quota == nil || response.Data.UsedQuota == nil {
+		if strings.TrimSpace(response.Message) == "" {
+			return nil, fmt.Errorf("invalid NewAPI response")
+		}
+		return nil, fmt.Errorf("invalid NewAPI response: %s", response.Message)
+	}
+	if !validProbeNumber(*response.Data.Quota) || !validProbeNumber(*response.Data.UsedQuota) {
+		return nil, fmt.Errorf("invalid NewAPI quota")
+	}
+	remaining := *response.Data.Quota / 500000
+	used := *response.Data.UsedQuota / 500000
+	total := remaining + used
+	if !validProbeNumber(remaining) || !validProbeNumber(used) || !validProbeNumber(total) {
+		return nil, fmt.Errorf("invalid NewAPI quota")
+	}
+	data := map[string]any{
+		"template":  UpstreamBillingProbeTemplateNewAPI,
+		"remaining": remaining,
+		"used":      used,
+		"total":     total,
+		"unit":      "USD",
+	}
+	if strings.TrimSpace(response.Data.Group) != "" {
+		data["plan_name"] = strings.TrimSpace(response.Data.Group)
+	}
+	return data, nil
+}
+
+func validProbeNumber(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && math.Abs(value) <= 1e15
 }
 
 func upstreamBillingRateAt(data map[string]any, now time.Time) (float64, bool) {
@@ -1077,6 +1216,23 @@ func upstreamBillingProbeEnabled(account *Account) bool {
 	}
 	enabled, ok := account.Extra[UpstreamBillingProbeEnabledExtraKey].(bool)
 	return ok && enabled
+}
+
+func upstreamBillingProbeTemplate(account *Account) string {
+	if account == nil || account.Extra == nil {
+		return upstreamBillingProbeTemplateLegacy
+	}
+	template, _ := account.Extra[UpstreamBillingProbeTemplateExtraKey].(string)
+	switch strings.TrimSpace(strings.ToLower(template)) {
+	case UpstreamBillingProbeTemplateNewAPI:
+		return UpstreamBillingProbeTemplateNewAPI
+	case UpstreamBillingProbeTemplateGeneral:
+		return UpstreamBillingProbeTemplateGeneral
+	default:
+		// Existing accounts predate template selection and keep the original
+		// Sub2API billing endpoint until an administrator chooses a template.
+		return upstreamBillingProbeTemplateLegacy
+	}
 }
 
 // upstreamBillingRateSyncEnabled is the probe-side pre-filter deciding whether

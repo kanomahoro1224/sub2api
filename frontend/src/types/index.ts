@@ -1015,20 +1015,26 @@ export interface TempUnschedulableStatus {
 }
 
 export interface UpstreamBillingData {
-  object: 'sub2api.key_billing'
-  schema_version: 1
-  billing_scope: 'token'
-  group_rate_multiplier: number
+  template?: 'general' | 'newapi'
+  object?: 'sub2api.key_billing'
+  schema_version?: 1
+  billing_scope?: 'token'
+  group_rate_multiplier?: number
   user_rate_multiplier?: number
-  resolved_rate_multiplier: number
-  peak_rate_enabled: boolean
+  resolved_rate_multiplier?: number
+  peak_rate_enabled?: boolean
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
   applied_peak_multiplier?: number
-  effective_rate_multiplier: number
+  effective_rate_multiplier?: number
   timezone?: string
-  observed_at: string
+  observed_at?: string
+  remaining?: number
+  used?: number
+  total?: number
+  unit?: string
+  plan_name?: string
 }
 
 export type UpstreamBillingProbeStatus = 'ok' | 'unsupported' | 'failed'
@@ -1178,6 +1184,8 @@ export interface Account {
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
     upstream_billing_probe_enabled?: boolean
     upstream_billing_rate_sync_enabled?: boolean
+    upstream_billing_probe_template?: 'general' | 'newapi'
+    upstream_billing_probe_user_id?: string
     upstream_billing_probe?: UpstreamBillingProbeSnapshot
     codex_reset_credit_snapshot?: {
       available_count?: number

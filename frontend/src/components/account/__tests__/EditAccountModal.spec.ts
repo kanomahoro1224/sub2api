@@ -713,6 +713,24 @@ describe('EditAccountModal', () => {
     expect(payload).not.toHaveProperty('rate_multiplier')
   })
 
+  it('saves the selected upstream probe template and NewAPI user id', async () => {
+    const account = buildAccount()
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="upstream-billing-template"]').setValue('newapi')
+    const userID = wrapper.get<HTMLInputElement>('[data-testid="upstream-billing-user-id"]')
+    await userID.setValue('114514')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload?.extra?.upstream_billing_probe_template).toBe('newapi')
+    expect(payload?.extra?.upstream_billing_probe_user_id).toBe('114514')
+  })
+
   it('disabling probing also disables rate sync and restores manual rate editing', async () => {
     const account = buildAccount()
     account.extra = {

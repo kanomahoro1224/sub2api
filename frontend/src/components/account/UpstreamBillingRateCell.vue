@@ -232,7 +232,7 @@ import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { formatMultiplier } from '@/utils/formatters'
 import { currencySymbol } from '@/components/payment/currency'
-import type { Account, UpstreamBillingProbeSnapshot, UpstreamQuotaQueryResult } from '@/types'
+import type { Account, UpstreamBillingProbeSnapshot, UpstreamQuotaInfo, UpstreamQuotaQueryResult } from '@/types'
 
 type ActionFeedback = 'success' | 'error'
 
@@ -271,7 +271,20 @@ const metricLabelWidthClass = computed(() => compactMetricLayout.value ? 'w-5' :
 const metricValueWidthClass = computed(() => compactMetricLayout.value ? 'w-[46px]' : 'w-16')
 const snapshot = computed<UpstreamBillingProbeSnapshot | undefined>(() => props.account.extra?.upstream_billing_probe)
 const data = computed(() => snapshot.value?.data)
-const quota = computed(() => props.quotaResult?.quota ?? null)
+const snapshotQuota = computed<UpstreamQuotaInfo | null>(() => {
+  const current = data.value
+  if (!current || typeof current.remaining !== 'number' || !Number.isFinite(current.remaining)) return null
+  const template = current.template ?? 'general'
+  return {
+    provider: template === 'newapi' ? 'new_api' : 'sub2api',
+    mode: template === 'newapi' ? 'quota' : 'balance',
+    unit: current.unit === 'CNY' || current.unit === 'TOKENS' ? current.unit : 'USD',
+    remaining: current.remaining,
+    used: typeof current.used === 'number' && Number.isFinite(current.used) ? current.used : undefined,
+    total: typeof current.total === 'number' && Number.isFinite(current.total) ? current.total : undefined
+  }
+})
+const quota = computed(() => props.quotaResult?.quota ?? snapshotQuota.value)
 const probeEnabled = computed(() => props.account.extra?.upstream_billing_probe_enabled === true)
 const automaticProbeActive = computed(() => probeEnabled.value && props.globalProbeEnabled !== false)
 const nextProbeAt = computed(() => {
@@ -413,6 +426,8 @@ const probeReasonText = computed(() => {
     case 'response_read_failed': return t('admin.accounts.upstreamBilling.probeResponseReadFailed')
     case 'empty_response': return t('admin.accounts.upstreamBilling.probeEmptyResponse')
     case 'missing_api_key': return t('admin.accounts.upstreamBilling.probeMissingApiKey')
+    case 'missing_user_id': return t('admin.accounts.upstreamBilling.probeMissingUserId')
+    case 'invalid_user_id': return t('admin.accounts.upstreamBilling.probeInvalidUserId')
     case 'invalid_base_url': return t('admin.accounts.upstreamBilling.probeInvalidBaseUrl')
     case 'proxy_unavailable': return t('admin.accounts.upstreamBilling.probeProxyUnavailable')
     case 'transport_unavailable': return t('admin.accounts.upstreamBilling.probeTransportUnavailable')
@@ -542,10 +557,10 @@ const quotaActionIcon = computed(() => {
   if (props.quotaLoading) return 'refresh'
   if (props.quotaFeedback === 'success') return 'check'
   if (props.quotaFeedback === 'error') return 'x'
-  return props.quotaResult ? 'refresh' : 'search'
+  return props.quotaResult || snapshotQuota.value ? 'refresh' : 'search'
 })
 const quotaActionLabel = computed(() => t(
-  props.quotaResult
+  props.quotaResult || snapshotQuota.value
     ? 'admin.accounts.upstreamBilling.refreshQuota'
     : 'admin.accounts.upstreamBilling.queryQuota'
 ))

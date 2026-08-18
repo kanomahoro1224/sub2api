@@ -1445,6 +1445,7 @@ const applyUpstreamBillingRateSnapshots = async (
 }
 
 const refreshUpstreamBillingRates = async (force = false) => {
+  if (upstreamBillingProbeGloballyEnabled.value === false) return
   if (upstreamBillingRateRefreshing.value || loading.value) return
   if (!force && (
     accounts.value.length === 0 ||
@@ -1494,6 +1495,7 @@ const refreshUpstreamBillingRates = async (force = false) => {
 // Manual probes use the same compact reconciliation path. The automatic
 // timer below calls refreshUpstreamBillingRates for every sort mode.
 const refreshUpstreamBillingSortedList = async (force = false) => {
+  if (upstreamBillingProbeGloballyEnabled.value === false) return
   if (!force && sortState.sort_by !== 'upstream_billing_rate') return
   await refreshUpstreamBillingRates(force)
 }
@@ -1713,6 +1715,11 @@ const loadUpstreamBillingProbeGlobalState = async () => {
   try {
     const settings = await adminAPI.accounts.getUpstreamBillingProbeSettings()
     upstreamBillingProbeGloballyEnabled.value = settings.enabled
+    if (!settings.enabled) {
+      upstreamBillingRateAbortController?.abort()
+      upstreamBillingRateAbortController = null
+      upstreamBillingRateETag.value = null
+    }
   } catch (error) {
     console.error('Failed to load upstream billing probe settings:', error)
   }
@@ -2025,13 +2032,20 @@ const allColumns = computed(() => {
     { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true },
     { key: 'scheduler_score', label: t('admin.accounts.columns.schedulerScore'), sortable: false },
     { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
-    { key: 'upstream_billing_rate', label: t('admin.accounts.columns.upstreamBillingRate'), sortable: true },
     { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: true },
     { key: 'created_at', label: t('admin.accounts.columns.createdAt'), sortable: true },
     { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
     { key: 'notes', label: t('admin.accounts.columns.notes'), sortable: false },
     { key: 'actions', label: t('admin.accounts.columns.actions'), sortable: false }
   )
+  if (upstreamBillingProbeGloballyEnabled.value !== false) {
+    const upstreamColumnIndex = c.findIndex(column => column.key === 'last_used_at')
+    c.splice(upstreamColumnIndex, 0, {
+      key: 'upstream_billing_rate',
+      label: t('admin.accounts.columns.upstreamBillingRate'),
+      sortable: true
+    })
+  }
   return c
 })
 
