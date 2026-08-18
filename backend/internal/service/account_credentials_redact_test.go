@@ -10,11 +10,11 @@ import (
 
 func TestMergePreservingSensitiveCreds_PreservesSensitiveWhenIncomingMissing(t *testing.T) {
 	existing := map[string]any{
-		"refresh_token":                             "rt-old",
-		"access_token":                              "at-old",
-		"api_key":                                   "sk-old",
+		"refresh_token":                       "rt-old",
+		"access_token":                        "at-old",
+		"api_key":                             "sk-old",
 		"upstream_billing_probe_access_token": "probe-old",
-		"base_url":                                  "https://old.example.com",
+		"base_url":                            "https://old.example.com",
 	}
 	incoming := map[string]any{
 		"base_url":      "https://new.example.com",

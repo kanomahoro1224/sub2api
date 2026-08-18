@@ -14,14 +14,14 @@ func TestRedactCredentials_NilInput(t *testing.T) {
 
 func TestRedactCredentials_StripsSensitiveKeysAndReportsStatus(t *testing.T) {
 	in := map[string]any{
-		"refresh_token":                             "rt-secret",
-		"access_token":                              "at-secret",
-		"api_key":                                   "sk-secret",
+		"refresh_token":                       "rt-secret",
+		"access_token":                        "at-secret",
+		"api_key":                             "sk-secret",
 		"upstream_billing_probe_access_token": "probe-secret",
-		"aws_secret_access_key":                     "aws-secret",
-		"service_account_json":                      map[string]any{"private_key": "..."},
-		"private_key":                               "raw-key",
-		"agent_private_key":                         "agent-key-secret",
+		"aws_secret_access_key":               "aws-secret",
+		"service_account_json":                map[string]any{"private_key": "..."},
+		"private_key":                         "raw-key",
+		"agent_private_key":                   "agent-key-secret",
 		// 非敏感
 		"base_url":      "https://api.example.com",
 		"model_mapping": map[string]any{"foo": "bar"},

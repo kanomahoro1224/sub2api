@@ -348,9 +348,9 @@ func TestUpstreamBillingProbeNewAPIUsesCCSwitchPreset(t *testing.T) {
 		Status:      StatusActive,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"api_key":                                    "model-api-key",
-			"base_url":                                   "https://model-api.example",
-			UpstreamBillingProbeBaseURLCredentialKey:     "https://newapi.example",
+			"api_key":                                "model-api-key",
+			"base_url":                               "https://model-api.example",
+			UpstreamBillingProbeBaseURLCredentialKey: "https://newapi.example",
 			UpstreamBillingProbeAccessTokenCredentialKey: "newapi-access-token",
 		},
 		Extra: map[string]any{
@@ -407,9 +407,9 @@ func TestUpstreamBillingProbeNewAPIRequiresDedicatedCredentials(t *testing.T) {
 				Type:     AccountTypeAPIKey,
 				Status:   StatusActive,
 				Credentials: map[string]any{
-					"api_key":                                    "model-api-key",
-					"base_url":                                  "https://model-api.example",
-					UpstreamBillingProbeBaseURLCredentialKey:     "https://newapi.example",
+					"api_key":                                "model-api-key",
+					"base_url":                               "https://model-api.example",
+					UpstreamBillingProbeBaseURLCredentialKey: "https://newapi.example",
 					UpstreamBillingProbeAccessTokenCredentialKey: "newapi-access-token",
 				},
 				Extra: map[string]any{
@@ -436,10 +436,10 @@ func TestUpstreamBillingProbeNewAPIRequiresDedicatedCredentials(t *testing.T) {
 
 func TestUpstreamBillingProbeNewAPIRejectsUnsafeUserID(t *testing.T) {
 	account := &Account{
-		ID:          21,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeAPIKey,
-		Status:      StatusActive,
+		ID:       21,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Status:   StatusActive,
 		Credentials: map[string]any{
 			UpstreamBillingProbeBaseURLCredentialKey:     "https://newapi.example",
 			UpstreamBillingProbeAccessTokenCredentialKey: "newapi-access-token",
