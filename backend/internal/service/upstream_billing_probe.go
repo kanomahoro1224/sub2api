@@ -34,6 +34,10 @@ const (
 	UpstreamBillingRateSyncEnabledExtraKey = "upstream_billing_rate_sync_enabled"
 	UpstreamBillingProbeTemplateExtraKey   = "upstream_billing_probe_template"
 	UpstreamBillingProbeUserIDExtraKey     = "upstream_billing_probe_user_id"
+	// NewAPI uses a personal access token and endpoint that are independent from
+	// the model API credentials stored in api_key/base_url.
+	UpstreamBillingProbeBaseURLCredentialKey     = "upstream_billing_probe_base_url"
+	UpstreamBillingProbeAccessTokenCredentialKey = "upstream_billing_probe_access_token"
 
 	upstreamBillingProbeDefaultIntervalMinutes = 30
 	upstreamBillingProbeMinIntervalMinutes     = 5
@@ -627,14 +631,23 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 	if s.accountTestService == nil || s.accountTestService.httpUpstream == nil {
 		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "transport_unavailable", 0)
 	}
-	// 平台放宽后取数直读 credentials：所有 API-key 平台的密钥与自定义上游
-	// 统一存放在 credentials.api_key / credentials.base_url。
+	template := upstreamBillingProbeTemplate(account)
+	// General probes use the account's model credentials. NewAPI probes use
+	// their own endpoint and personal access token from the account editor.
 	apiKey := account.GetCredential("api_key")
-	if apiKey == "" {
+	baseURL := account.GetCredential("base_url")
+	if template == UpstreamBillingProbeTemplateNewAPI {
+		baseURL = account.GetCredential(UpstreamBillingProbeBaseURLCredentialKey)
+		apiKey = account.GetCredential(UpstreamBillingProbeAccessTokenCredentialKey)
+		if apiKey == "" {
+			return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "missing_access_token", 0)
+		}
+		if strings.TrimSpace(baseURL) == "" {
+			return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "missing_probe_base_url", 0)
+		}
+	} else if apiKey == "" {
 		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "missing_api_key", 0)
 	}
-	template := upstreamBillingProbeTemplate(account)
-	baseURL := account.GetCredential("base_url")
 	if account.Platform == PlatformOpenAI {
 		if baseURL == "" {
 			// 保持官方语义：OpenAI 账号无自定义 base 时探官方域（404 → unsupported）。

@@ -426,6 +426,8 @@ const probeReasonText = computed(() => {
     case 'response_read_failed': return t('admin.accounts.upstreamBilling.probeResponseReadFailed')
     case 'empty_response': return t('admin.accounts.upstreamBilling.probeEmptyResponse')
     case 'missing_api_key': return t('admin.accounts.upstreamBilling.probeMissingApiKey')
+    case 'missing_access_token': return t('admin.accounts.upstreamBilling.probeMissingAccessToken')
+    case 'missing_probe_base_url': return t('admin.accounts.upstreamBilling.probeMissingBaseUrl')
     case 'missing_user_id': return t('admin.accounts.upstreamBilling.probeMissingUserId')
     case 'invalid_user_id': return t('admin.accounts.upstreamBilling.probeInvalidUserId')
     case 'invalid_base_url': return t('admin.accounts.upstreamBilling.probeInvalidBaseUrl')

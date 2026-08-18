@@ -347,7 +347,12 @@ func TestUpstreamBillingProbeNewAPIUsesCCSwitchPreset(t *testing.T) {
 		Type:        AccountTypeAPIKey,
 		Status:      StatusActive,
 		Concurrency: 1,
-		Credentials: map[string]any{"api_key": "newapi-access-token", "base_url": "https://newapi.example"},
+		Credentials: map[string]any{
+			"api_key":                                    "model-api-key",
+			"base_url":                                   "https://model-api.example",
+			UpstreamBillingProbeBaseURLCredentialKey:     "https://newapi.example",
+			UpstreamBillingProbeAccessTokenCredentialKey: "newapi-access-token",
+		},
 		Extra: map[string]any{
 			UpstreamBillingProbeEnabledExtraKey:  true,
 			UpstreamBillingProbeTemplateExtraKey: UpstreamBillingProbeTemplateNewAPI,
@@ -383,26 +388,50 @@ func TestParseGeneralProbeResponseUsesCCSwitchBalanceShape(t *testing.T) {
 	require.Equal(t, "USD", data["unit"])
 }
 
-func TestUpstreamBillingProbeNewAPIRequiresUserID(t *testing.T) {
-	account := &Account{
-		ID:          20,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeAPIKey,
-		Status:      StatusActive,
-		Credentials: map[string]any{"api_key": "newapi-access-token", "base_url": "https://newapi.example"},
-		Extra: map[string]any{
-			UpstreamBillingProbeEnabledExtraKey:  true,
-			UpstreamBillingProbeTemplateExtraKey: UpstreamBillingProbeTemplateNewAPI,
-		},
+func TestUpstreamBillingProbeNewAPIRequiresDedicatedCredentials(t *testing.T) {
+	tests := []struct {
+		name      string
+		removeKey string
+		removeID  bool
+		wantError string
+	}{
+		{name: "base URL", removeKey: UpstreamBillingProbeBaseURLCredentialKey, wantError: "missing_probe_base_url"},
+		{name: "access token", removeKey: UpstreamBillingProbeAccessTokenCredentialKey, wantError: "missing_access_token"},
+		{name: "user ID", removeID: true, wantError: "missing_user_id"},
 	}
-	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
-	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`))}}
-	svc := newUpstreamBillingProbeTestService(repo, upstream, &upstreamBillingProbeSettingRepo{})
-	snapshot, err := svc.ProbeAccount(context.Background(), account.ID)
-	require.NoError(t, err)
-	require.Equal(t, UpstreamBillingProbeStatusFailed, snapshot.Status)
-	require.Equal(t, "missing_user_id", snapshot.LastError)
-	require.Nil(t, upstream.lastReq)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			account := &Account{
+				ID:       20,
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+				Status:   StatusActive,
+				Credentials: map[string]any{
+					"api_key":                                    "model-api-key",
+					"base_url":                                  "https://model-api.example",
+					UpstreamBillingProbeBaseURLCredentialKey:     "https://newapi.example",
+					UpstreamBillingProbeAccessTokenCredentialKey: "newapi-access-token",
+				},
+				Extra: map[string]any{
+					UpstreamBillingProbeEnabledExtraKey:  true,
+					UpstreamBillingProbeTemplateExtraKey: UpstreamBillingProbeTemplateNewAPI,
+					UpstreamBillingProbeUserIDExtraKey:   "114514",
+				},
+			}
+			delete(account.Credentials, tt.removeKey)
+			if tt.removeID {
+				delete(account.Extra, UpstreamBillingProbeUserIDExtraKey)
+			}
+			repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`))}}
+			svc := newUpstreamBillingProbeTestService(repo, upstream, &upstreamBillingProbeSettingRepo{})
+			snapshot, err := svc.ProbeAccount(context.Background(), account.ID)
+			require.NoError(t, err)
+			require.Equal(t, UpstreamBillingProbeStatusFailed, snapshot.Status)
+			require.Equal(t, tt.wantError, snapshot.LastError)
+			require.Nil(t, upstream.lastReq)
+		})
+	}
 }
 
 func TestUpstreamBillingProbeNewAPIRejectsUnsafeUserID(t *testing.T) {
@@ -411,7 +440,10 @@ func TestUpstreamBillingProbeNewAPIRejectsUnsafeUserID(t *testing.T) {
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeAPIKey,
 		Status:      StatusActive,
-		Credentials: map[string]any{"api_key": "newapi-access-token", "base_url": "https://newapi.example"},
+		Credentials: map[string]any{
+			UpstreamBillingProbeBaseURLCredentialKey:     "https://newapi.example",
+			UpstreamBillingProbeAccessTokenCredentialKey: "newapi-access-token",
+		},
 		Extra: map[string]any{
 			UpstreamBillingProbeEnabledExtraKey:  true,
 			UpstreamBillingProbeTemplateExtraKey: UpstreamBillingProbeTemplateNewAPI,

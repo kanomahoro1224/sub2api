@@ -1798,6 +1798,29 @@
               />
             </div>
             <div v-if="upstreamBillingProbeTemplate === 'newapi'">
+              <label class="input-label">{{ t('admin.accounts.upstreamBilling.baseUrl') }}</label>
+              <input
+                v-model.trim="upstreamBillingProbeBaseURL"
+                type="text"
+                class="input"
+                :placeholder="t('admin.accounts.upstreamBilling.baseUrlPlaceholder')"
+                data-testid="upstream-billing-base-url"
+              />
+              <p class="input-hint">{{ t('admin.accounts.upstreamBilling.baseUrlHint') }}</p>
+            </div>
+            <div v-if="upstreamBillingProbeTemplate === 'newapi'">
+              <label class="input-label">{{ t('admin.accounts.upstreamBilling.accessToken') }}</label>
+              <input
+                v-model.trim="upstreamBillingProbeAccessToken"
+                type="password"
+                autocomplete="new-password"
+                class="input font-mono"
+                :placeholder="t('admin.accounts.upstreamBilling.accessTokenPlaceholder')"
+                data-testid="upstream-billing-access-token"
+              />
+              <p class="input-hint">{{ t('admin.accounts.upstreamBilling.accessTokenHint') }}</p>
+            </div>
+            <div v-if="upstreamBillingProbeTemplate === 'newapi'">
               <label class="input-label">{{ t('admin.accounts.upstreamBilling.userId') }}</label>
               <input
                 v-model.trim="upstreamBillingProbeUserID"
@@ -3065,6 +3088,8 @@ const autoPause7dDisabled = ref(false)
 const upstreamBillingAutoProbeEnabled = ref(false)
 const upstreamBillingRateSyncEnabled = ref(false)
 const upstreamBillingProbeTemplate = ref<'general' | 'newapi'>('general')
+const upstreamBillingProbeBaseURL = ref('')
+const upstreamBillingProbeAccessToken = ref('')
 const upstreamBillingProbeUserID = ref('')
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
@@ -3601,6 +3626,10 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 	upstreamBillingRateSyncEnabled.value =
     upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_rate_sync_enabled === true
 	upstreamBillingProbeTemplate.value = extra?.upstream_billing_probe_template === 'newapi' ? 'newapi' : 'general'
+	upstreamBillingProbeBaseURL.value = typeof credentials?.upstream_billing_probe_base_url === 'string'
+	  ? credentials.upstream_billing_probe_base_url
+	  : ''
+	upstreamBillingProbeAccessToken.value = ''
 	upstreamBillingProbeUserID.value = typeof extra?.upstream_billing_probe_user_id === 'string'
 	  ? extra.upstream_billing_probe_user_id
 	  : ''
@@ -4574,6 +4603,31 @@ const handleSubmit = async () => {
       applyAccountSchedulingThresholdOverridePatch(newCredentials, currentCredentials)
       if (!applyTempUnschedConfig(newCredentials)) {
         return
+      }
+
+      if (upstreamBillingProbeTemplate.value === 'newapi') {
+        const probeBaseURL = upstreamBillingProbeBaseURL.value.trim()
+        const probeAccessToken = upstreamBillingProbeAccessToken.value.trim()
+        const probeUserID = upstreamBillingProbeUserID.value.trim()
+        const hasExistingProbeAccessToken =
+          props.account.credentials_status?.has_upstream_billing_probe_access_token ??
+          Boolean(currentCredentials.upstream_billing_probe_access_token)
+        if (!probeBaseURL) {
+          appStore.showError(t('admin.accounts.upstreamBilling.probeBaseUrlRequired'))
+          return
+        }
+        if (!probeAccessToken && !hasExistingProbeAccessToken) {
+          appStore.showError(t('admin.accounts.upstreamBilling.probeAccessTokenRequired'))
+          return
+        }
+        if (!probeUserID) {
+          appStore.showError(t('admin.accounts.upstreamBilling.probeUserIdRequired'))
+          return
+        }
+        newCredentials.upstream_billing_probe_base_url = probeBaseURL
+        if (probeAccessToken) {
+          newCredentials.upstream_billing_probe_access_token = probeAccessToken
+        }
       }
 
       updatePayload.credentials = newCredentials

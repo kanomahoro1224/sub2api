@@ -1172,7 +1172,8 @@ export interface Account {
   platform: AccountPlatform
   type: AccountType
   // 后端响应里 credentials 已脱敏：access_token / refresh_token / id_token /
-  // api_key / session_key / cookie / aws_secret_access_key / aws_session_token /
+  // api_key / session_key / cookie / upstream_billing_probe_access_token /
+  // aws_secret_access_key / aws_session_token /
   // service_account_json / service_account / private_key 不会出现，
   // 改为通过 credentials_status.has_<key> 暴露存在性。
   credentials?: Record<string, unknown>

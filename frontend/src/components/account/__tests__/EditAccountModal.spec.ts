@@ -713,7 +713,7 @@ describe('EditAccountModal', () => {
     expect(payload).not.toHaveProperty('rate_multiplier')
   })
 
-  it('saves the selected upstream probe template and NewAPI user id', async () => {
+  it('saves the three dedicated NewAPI probe credentials', async () => {
     const account = buildAccount()
     updateAccountMock.mockReset()
     checkMixedChannelRiskMock.mockReset()
@@ -722,6 +722,8 @@ describe('EditAccountModal', () => {
 
     const wrapper = mountModal(account)
     await wrapper.get('[data-testid="upstream-billing-template"]').setValue('newapi')
+    await wrapper.get('[data-testid="upstream-billing-base-url"]').setValue('https://newapi.example')
+    await wrapper.get('[data-testid="upstream-billing-access-token"]').setValue('newapi-access-token')
     const userID = wrapper.get<HTMLInputElement>('[data-testid="upstream-billing-user-id"]')
     await userID.setValue('114514')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
@@ -729,6 +731,64 @@ describe('EditAccountModal', () => {
     const payload = updateAccountMock.mock.calls[0]?.[1]
     expect(payload?.extra?.upstream_billing_probe_template).toBe('newapi')
     expect(payload?.extra?.upstream_billing_probe_user_id).toBe('114514')
+    expect(payload?.credentials?.upstream_billing_probe_base_url).toBe('https://newapi.example')
+    expect(payload?.credentials?.upstream_billing_probe_access_token).toBe('newapi-access-token')
+  })
+
+  it('preserves an existing redacted NewAPI access token when the field is left blank', async () => {
+    const account = buildAccount()
+    account.credentials = {
+      api_key: 'sk-test',
+      base_url: 'https://api.openai.com',
+      upstream_billing_probe_base_url: 'https://newapi.example'
+    }
+    account.credentials_status = {
+      has_api_key: true,
+      has_upstream_billing_probe_access_token: true
+    }
+    account.extra = {
+      upstream_billing_probe_template: 'newapi',
+      upstream_billing_probe_user_id: '114514'
+    }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="upstream-billing-access-token"]').element.value).toBe('')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).not.toHaveProperty(
+      'upstream_billing_probe_access_token'
+    )
+  })
+
+  it('blocks saving an incomplete NewAPI probe configuration', async () => {
+    const cases = [
+      { missing: 'base URL', baseURL: '', accessToken: 'newapi-access-token', userID: '114514' },
+      { missing: 'access token', baseURL: 'https://newapi.example', accessToken: '', userID: '114514' },
+      { missing: 'user ID', baseURL: 'https://newapi.example', accessToken: 'newapi-access-token', userID: '' }
+    ]
+
+    for (const testCase of cases) {
+      const account = buildAccount()
+      updateAccountMock.mockReset()
+      checkMixedChannelRiskMock.mockReset()
+      checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+      updateAccountMock.mockResolvedValue(account)
+
+      const wrapper = mountModal(account)
+      await wrapper.get('[data-testid="upstream-billing-template"]').setValue('newapi')
+      await wrapper.get('[data-testid="upstream-billing-base-url"]').setValue(testCase.baseURL)
+      await wrapper.get('[data-testid="upstream-billing-access-token"]').setValue(testCase.accessToken)
+      await wrapper.get('[data-testid="upstream-billing-user-id"]').setValue(testCase.userID)
+      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+      expect(updateAccountMock, testCase.missing).not.toHaveBeenCalled()
+      wrapper.unmount()
+    }
   })
 
   it('disabling probing also disables rate sync and restores manual rate editing', async () => {
