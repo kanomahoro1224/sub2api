@@ -42,11 +42,18 @@
         </button>
       </template>
     </div>
-    <div class="flex gap-2">
+    <div class="flex flex-wrap justify-end gap-2">
       <template v-if="selectedIds.length > 0">
         <button @click="$emit('delete')" class="btn btn-danger btn-sm">{{ t('admin.accounts.bulkActions.delete') }}</button>
         <button @click="$emit('reset-status')" class="btn btn-secondary btn-sm">{{ t('admin.accounts.bulkActions.resetStatus') }}</button>
         <button @click="$emit('refresh-token')" class="btn btn-secondary btn-sm">{{ t('admin.accounts.bulkActions.refreshToken') }}</button>
+        <button
+          :disabled="queryingUpstreamQuota"
+          @click="$emit('query-upstream-quota')"
+          class="btn btn-secondary btn-sm disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {{ t('admin.accounts.bulkActions.queryUpstreamQuota') }}
+        </button>
         <button @click="$emit('probe-upstream-billing')" class="btn btn-secondary btn-sm">{{ t('admin.accounts.bulkActions.probeUpstreamBilling') }}</button>
         <button @click="$emit('toggle-schedulable', true)" class="btn btn-success btn-sm">{{ t('admin.accounts.bulkActions.enableScheduling') }}</button>
         <button @click="$emit('toggle-schedulable', false)" class="btn btn-warning btn-sm">{{ t('admin.accounts.bulkActions.disableScheduling') }}</button>
@@ -62,13 +69,15 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 
-defineProps<{
+withDefaults(defineProps<{
   selectedIds: number[]
   totalResults: number
   selectingAll: boolean
   allResultsSelected: boolean
-}>()
-
+  queryingUpstreamQuota?: boolean
+}>(), {
+  queryingUpstreamQuota: false
+})
 defineEmits([
   'delete',
   'edit-selected',
@@ -79,6 +88,7 @@ defineEmits([
   'toggle-schedulable',
   'reset-status',
   'refresh-token',
+  'query-upstream-quota',
   'probe-upstream-billing'
 ])
 

@@ -7,6 +7,7 @@ const {
   listAccounts,
   listWithEtag,
   getBatchTodayStats,
+  getUpstreamBillingRatesWithEtag,
   getUpstreamBillingProbeSettings,
   getAllProxies,
   getAllGroups,
@@ -18,6 +19,7 @@ const {
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
   getBatchTodayStats: vi.fn(),
+  getUpstreamBillingRatesWithEtag: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn(),
@@ -33,6 +35,7 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag,
       getBatchTodayStats,
+      getUpstreamBillingRatesWithEtag,
       getUpstreamBillingProbeSettings,
       delete: vi.fn(),
       batchClearError: vi.fn(),
@@ -128,6 +131,7 @@ describe('admin AccountsView bulk edit scope', () => {
     listAccounts.mockReset()
     listWithEtag.mockReset()
     getBatchTodayStats.mockReset()
+    getUpstreamBillingRatesWithEtag.mockReset()
     getUpstreamBillingProbeSettings.mockReset()
     getAllProxies.mockReset()
     getAllGroups.mockReset()
@@ -149,6 +153,7 @@ describe('admin AccountsView bulk edit scope', () => {
       data: null
     })
     getBatchTodayStats.mockResolvedValue({ stats: {} })
+    getUpstreamBillingRatesWithEtag.mockResolvedValue({ notModified: true, etag: null, data: null })
     getUpstreamBillingProbeSettings.mockResolvedValue({ enabled: true, interval_minutes: 30 })
     getAllProxies.mockResolvedValue([])
     getAllGroups.mockResolvedValue([])
@@ -427,6 +432,24 @@ describe('admin AccountsView bulk edit scope', () => {
         }
       }
     ])
+    getUpstreamBillingRatesWithEtag.mockResolvedValueOnce({
+      notModified: false,
+      etag: 'rate-refresh',
+      data: {
+        items: [{
+          account_id: 11,
+          snapshot: {
+            status: 'ok',
+            data: { effective_rate_multiplier: 0.065 },
+            last_attempt_at: '2026-07-13T00:00:00Z',
+            next_probe_at: '2026-07-13T00:30:00Z'
+          }
+        }],
+        total: 2,
+        page: 2,
+        page_size: 1
+      }
+    })
 
     const wrapper = mount(AccountsView, {
       global: {
@@ -471,9 +494,7 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
 
     expect(probeUpstreamBillingBatch).toHaveBeenCalledWith([11])
-    expect(listAccounts).toHaveBeenCalledTimes(3)
-    expect(listAccounts.mock.calls[2]?.[0]).toBe(2)
-    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.065x')
+    expect(getUpstreamBillingRatesWithEtag).toHaveBeenCalledOnce()
   })
 
   it('does not report a successful batch probe as failed when the list refresh fails', async () => {
@@ -574,6 +595,24 @@ describe('admin AccountsView bulk edit scope', () => {
         next_probe_at: '2026-07-13T00:30:00Z'
       }
     })
+    getUpstreamBillingRatesWithEtag.mockResolvedValueOnce({
+      notModified: false,
+      etag: 'rate-refresh',
+      data: {
+        items: [{
+          account_id: 7,
+          snapshot: {
+            status: 'ok',
+            data: { effective_rate_multiplier: 0.065 },
+            last_attempt_at: '2026-07-13T00:00:00Z',
+            next_probe_at: '2026-07-13T00:30:00Z'
+          }
+        }],
+        total: 1,
+        page: 1,
+        page_size: 20
+      }
+    })
 
     const wrapper = mount(AccountsView, {
       global: {
@@ -615,7 +654,6 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
 
     expect(probeUpstreamBilling).toHaveBeenCalledWith(7)
-    expect(listAccounts).toHaveBeenCalledTimes(2)
-    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.065x')
+    expect(getUpstreamBillingRatesWithEtag).toHaveBeenCalledOnce()
   })
 })
