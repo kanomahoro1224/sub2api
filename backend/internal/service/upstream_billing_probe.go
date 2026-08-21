@@ -645,8 +645,13 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 		if strings.TrimSpace(baseURL) == "" {
 			return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "missing_probe_base_url", 0)
 		}
-	} else if apiKey == "" {
-		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "missing_api_key", 0)
+	} else {
+		if apiKey == "" {
+			return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "missing_api_key", 0)
+		}
+		if account.IsCNProvider() && account.IsAdaptiveAPIProtocol() {
+			baseURL = account.GetCNProtocolBaseURL(APIProtocolChatCompletions)
+		}
 	}
 	if account.Platform == PlatformOpenAI {
 		if baseURL == "" {
