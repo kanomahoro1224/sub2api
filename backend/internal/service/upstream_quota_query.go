@@ -278,8 +278,8 @@ func (s *UpstreamBillingProbeService) newUpstreamQuotaQueryClient(account *Accou
 		tlsProfile = s.accountTestService.tlsFPProfileService.ResolveTLSProfile(account)
 	}
 	return &upstreamQuotaQueryClient{
-		upstream:   s.accountTestService.httpUpstream,
-		account:    account,
+		upstream:     s.accountTestService.httpUpstream,
+		account:      account,
 		baseURL:      baseURL,
 		apiKey:       apiKey,
 		template:     template,
