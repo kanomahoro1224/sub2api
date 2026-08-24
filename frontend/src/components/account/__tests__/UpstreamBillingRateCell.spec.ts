@@ -360,6 +360,38 @@ describe('UpstreamBillingRateCell', () => {
     wrapper.unmount()
   })
 
+  it('hides the rate row for the NewAPI template while keeping quota actions', () => {
+    const wrapper = mount(UpstreamBillingRateCell, {
+      props: {
+        account: makeAccount({
+          extra: {
+            upstream_billing_probe_template: 'newapi',
+            upstream_billing_probe: {
+              status: 'ok',
+              data: {
+                template: 'newapi',
+                remaining: 2,
+                used: 0.5,
+                total: 2.5,
+                unit: 'USD'
+              },
+              received_at: '2026-07-13T00:00:00Z',
+              fresh_until: '2026-07-14T00:00:00Z',
+              last_attempt_at: '2026-07-13T00:00:00Z',
+              next_probe_at: '2026-07-13T01:00:00Z'
+            }
+          }
+        }),
+        now: Date.now()
+      }
+    })
+
+    expect(wrapper.find('[data-testid="upstream-rate-row"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="upstream-quota-row"]').text()).toContain('$2.00')
+    expect(wrapper.get('[data-testid="upstream-quota-query"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('retains the last successful quota and exposes a later refresh error independently', async () => {
     const wrapper = mount(UpstreamBillingRateCell, {
       attachTo: document.body,
@@ -393,6 +425,11 @@ describe('UpstreamBillingRateCell', () => {
       .find(component => component.attributes('data-testid') === 'upstream-quota-details')
     expect(quotaTooltip?.props('content')).toBe('$80.00')
     expect(quotaTooltip?.props('openDelayMs')).toBe(500)
+
+    await wrapper.get('[data-testid="upstream-quota-details"]').trigger('mouseenter')
+    await flushPromises()
+    const quotaErrorDetails = document.body.querySelector('[data-testid="upstream-quota-error-details"]')
+    expect(quotaErrorDetails?.textContent).toContain('admin.accounts.upstreamBilling.quotaError:upstream timeout')
 
     await wrapper.setProps({
       account: makeAccount({

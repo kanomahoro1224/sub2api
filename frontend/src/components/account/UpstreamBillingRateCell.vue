@@ -5,6 +5,7 @@
     data-testid="upstream-information"
   >
     <div
+      v-if="!isNewAPI"
       class="inline-flex h-6 w-fit max-w-[13rem] items-center gap-[10px] rounded bg-gray-100/70 px-1 transition-colors hover:bg-gray-100 dark:bg-dark-700/60 dark:hover:bg-dark-700"
       data-testid="upstream-rate-row"
       :aria-busy="probing"
@@ -164,7 +165,7 @@
       </span>
       <div class="flex min-w-0 items-center gap-0.5 overflow-hidden">
         <HelpTooltip
-          v-if="quotaRemaining != null"
+          v-if="quotaRemaining != null || quotaFailureReason"
           class="!ml-0 shrink-0"
           :class="metricValueWidthClass"
           :content="quotaPrimaryValue"
@@ -185,7 +186,16 @@
               {{ quotaPrimaryValue }}
             </span>
           </template>
-          <span :class="quotaValueColorClass(quotaRemaining)">{{ quotaPrimaryValue }}</span>
+          <div class="space-y-1">
+            <span :class="quotaValueColorClass(quotaRemaining)">{{ quotaPrimaryValue }}</span>
+            <p
+              v-if="quotaFailureReason"
+              class="border-t border-white/15 pt-1 text-red-300"
+              data-testid="upstream-quota-error-details"
+            >
+              {{ t('admin.accounts.upstreamBilling.quotaError', { message: quotaFailureReason }) }}
+            </p>
+          </div>
         </HelpTooltip>
         <span
           v-else
@@ -197,7 +207,7 @@
           {{ quotaPrimaryValue }}
         </span>
         <span
-          v-if="quota && quotaError"
+          v-if="quotaFailureReason"
           class="shrink-0 whitespace-nowrap rounded bg-red-50 px-1 text-[10px] font-medium leading-4 text-red-600 dark:bg-red-900/30 dark:text-red-300"
         >
           {{ t('admin.accounts.upstreamBilling.quotaFailed') }}
@@ -246,6 +256,7 @@ const props = withDefaults(defineProps<{
   quotaLoading?: boolean
   rateError?: boolean
   rateErrorAt?: string | null
+  rateErrorMessage?: string | null
   rateFeedback?: ActionFeedback | null
   quotaFeedback?: ActionFeedback | null
 }>(), {
@@ -253,6 +264,7 @@ const props = withDefaults(defineProps<{
   quotaLoading: false,
   rateError: false,
   rateErrorAt: null,
+  rateErrorMessage: null,
   rateFeedback: null,
   quotaFeedback: null
 })
@@ -271,6 +283,7 @@ const metricLabelWidthClass = computed(() => compactMetricLayout.value ? 'w-5' :
 const metricValueWidthClass = computed(() => compactMetricLayout.value ? 'w-[46px]' : 'w-16')
 const snapshot = computed<UpstreamBillingProbeSnapshot | undefined>(() => props.account.extra?.upstream_billing_probe)
 const data = computed(() => snapshot.value?.data)
+const isNewAPI = computed(() => props.account.extra?.upstream_billing_probe_template === 'newapi')
 const snapshotQuota = computed<UpstreamQuotaInfo | null>(() => {
   const current = data.value
   if (!current || typeof current.remaining !== 'number' || !Number.isFinite(current.remaining)) return null
@@ -445,6 +458,7 @@ const probeReasonText = computed(() => {
 const rateFailureReasonText = computed(() => {
   if (!rateFailed.value) return ''
   if (snapshot.value?.status === 'failed') return probeReasonText.value
+  if (props.rateErrorMessage) return props.rateErrorMessage
   return t('admin.accounts.upstreamBilling.probeFailedReason')
 })
 const rateFailureGuidanceText = computed(() => (
@@ -457,6 +471,11 @@ const rateFailureAt = computed(() => (
     ? snapshot.value.last_attempt_at
     : props.rateErrorAt ?? undefined
 ))
+const quotaFailureReason = computed(() => {
+  if (props.quotaError) return props.quotaError
+  if (snapshot.value?.status === 'failed' && data.value?.remaining != null) return probeReasonText.value
+  return ''
+})
 const rateValueClass = computed(() => {
   const typography = hasNumericRate.value ? 'font-mono text-[11px] font-semibold' : 'text-[10px] font-medium'
   if (props.probing) return `${typography} text-gray-600 dark:text-gray-300`
@@ -522,13 +541,13 @@ const quotaPrimaryValue = computed(() => {
   if (quotaRemaining.value != null) return formatQuotaAmount(quotaRemaining.value)
   if (quota.value) return quotaModeLabel.value
   if (props.quotaLoading) return t('admin.accounts.upstreamBilling.queryingQuota')
-  if (props.quotaError) return t('admin.accounts.upstreamBilling.quotaFailed')
+  if (quotaFailureReason.value) return t('admin.accounts.upstreamBilling.quotaFailed')
   if (props.quotaResult) return t('admin.accounts.upstreamBilling.noQuotaData')
   return t('admin.accounts.upstreamBilling.notQueried')
 })
 const quotaValueColorClass = (amount: number | null) => {
   if (props.quotaLoading) return 'text-gray-600 dark:text-gray-300'
-  if (props.quotaError) return 'text-red-600 dark:text-red-400'
+  if (quotaFailureReason.value) return 'text-red-600 dark:text-red-400'
   if (amount != null) {
     return amount <= 0
       ? 'text-red-600 dark:text-red-400'

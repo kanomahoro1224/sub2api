@@ -384,6 +384,7 @@
               :quota-loading="queryingUpstreamQuota.has(row.id)"
               :rate-error="upstreamBillingRequestErrors.has(row.id)"
               :rate-error-at="upstreamBillingRequestErrors.get(row.id)"
+              :rate-error-message="upstreamBillingRequestErrorMessages.get(row.id)"
               :rate-feedback="upstreamBillingFeedback.get(row.id)"
               :quota-feedback="upstreamQuotaFeedback.get(row.id)"
               @probe="handleProbeUpstreamBilling(row)"
@@ -626,6 +627,7 @@ const probingUpstreamBilling = reactive(new Set<number>())
 const queryingUpstreamQuota = reactive(new Map<number, symbol>())
 const bulkQueryingUpstreamQuota = ref(false)
 const upstreamBillingRequestErrors = reactive(new Map<number, string>())
+const upstreamBillingRequestErrorMessages = reactive(new Map<number, string>())
 type UpstreamActionFeedback = 'success' | 'error'
 const upstreamBillingFeedback = reactive(new Map<number, UpstreamActionFeedback>())
 const upstreamQuotaFeedback = reactive(new Map<number, UpstreamActionFeedback>())
@@ -669,6 +671,12 @@ const upstreamQuotaCacheIdentity = (account: Account) => JSON.stringify({
   type: account.type,
   base_url: typeof account.credentials?.base_url === 'string' ? account.credentials.base_url : '',
   has_api_key: account.credentials_status?.has_api_key === true,
+  upstream_probe_template: account.extra?.upstream_billing_probe_template ?? 'general',
+  upstream_probe_base_url: typeof account.credentials?.upstream_billing_probe_base_url === 'string'
+    ? account.credentials.upstream_billing_probe_base_url
+    : '',
+  has_upstream_probe_access_token: account.credentials_status?.has_upstream_billing_probe_access_token === true,
+  upstream_probe_user_id: account.extra?.upstream_billing_probe_user_id ?? '',
   proxy_id: account.proxy_id,
   proxy_updated_at: account.proxy?.updated_at ?? null,
   enable_tls_fingerprint: account.extra?.enable_tls_fingerprint ?? account.enable_tls_fingerprint ?? null,
@@ -768,6 +776,7 @@ const invalidateOneUpstreamQuotaState = (accountID: number) => {
   upstreamQuotaErrors.delete(accountID)
   clearUpstreamActionFeedback(upstreamQuotaFeedback, upstreamQuotaFeedbackTimers, accountID)
   upstreamBillingRequestErrors.delete(accountID)
+  upstreamBillingRequestErrorMessages.delete(accountID)
   removePersistedUpstreamQuota(accountID)
 }
 const upstreamBillingProbeGloballyEnabled = ref<boolean | undefined>(undefined)
@@ -776,6 +785,8 @@ const upstreamBillingSortRefreshes = ref(0)
 const upstreamBillingRateETag = ref<string | null>(null)
 const upstreamBillingRateRefreshing = ref(false)
 let upstreamBillingRateAbortController: AbortController | null = null
+const upstreamInformationRefreshAt = new Map<number, number>()
+const UPSTREAM_INFORMATION_CACHE_TTL_MS = 5 * 60 * 1000
 // Keep peak-window rendering current locally; the persisted snapshot request
 // is intentionally scheduled separately at five-minute intervals below.
 useIntervalFn(() => { upstreamBillingNow.value = Date.now() }, 60_000)
@@ -1264,6 +1275,7 @@ watch(
       upstreamBillingFeedback.clear()
       upstreamQuotaFeedback.clear()
       upstreamBillingRequestErrors.clear()
+      upstreamBillingRequestErrorMessages.clear()
       hydratedUpstreamQuotaUserID = userID
     }
     if (userID == null) return
@@ -1370,6 +1382,7 @@ const load = async (options: AccountLoadOptions = {}) => {
   if (options.refreshTodayStats !== false) {
     await refreshTodayStatsBatch()
   }
+  void refreshUpstreamInformation()
 }
 
 const reload = async () => {
@@ -1498,6 +1511,50 @@ const refreshUpstreamBillingSortedList = async (force = false) => {
   if (upstreamBillingProbeGloballyEnabled.value === false) return
   if (!force && sortState.sort_by !== 'upstream_billing_rate') return
   await refreshUpstreamBillingRates(force)
+}
+
+const refreshUpstreamInformation = async (force = false) => {
+  if (upstreamBillingProbeGloballyEnabled.value !== true) return
+  if (typeof adminAPI.accounts.probeUpstreamBilling !== 'function') return
+  const now = Date.now()
+  const candidates = accounts.value.filter(account => (
+    account.type === 'apikey' &&
+    account.extra?.upstream_billing_probe_enabled === true &&
+    (force || now - (upstreamInformationRefreshAt.get(account.id) ?? 0) >= UPSTREAM_INFORMATION_CACHE_TTL_MS)
+  ))
+  if (candidates.length === 0) return
+
+  const refreshOne = async (account: Account) => {
+    upstreamInformationRefreshAt.set(account.id, Date.now())
+    const snapshot = account.extra?.upstream_billing_probe
+    const nextProbeAt = snapshot?.next_probe_at ? Date.parse(snapshot.next_probe_at) : Number.NaN
+    if (!force && Number.isFinite(nextProbeAt) && nextProbeAt > now) return
+    if (probingUpstreamBilling.has(account.id)) return
+
+    probingUpstreamBilling.add(account.id)
+    try {
+      const result = await adminAPI.accounts.probeUpstreamBilling(account.id)
+      if (result.snapshot) {
+        patchUpstreamBillingSnapshot(account.id, result.snapshot)
+        upstreamBillingRequestErrors.delete(account.id)
+        upstreamBillingRequestErrorMessages.delete(account.id)
+      } else {
+        upstreamBillingRequestErrors.set(account.id, new Date().toISOString())
+        upstreamBillingRequestErrorMessages.set(account.id, result.error || t('admin.accounts.upstreamBilling.probeFailed'))
+      }
+    } catch (error) {
+      upstreamBillingRequestErrors.set(account.id, new Date().toISOString())
+      upstreamBillingRequestErrorMessages.set(account.id, extractApiErrorMessage(error, t('admin.accounts.upstreamBilling.probeFailed')))
+      console.error('Failed to refresh upstream information:', error)
+    } finally {
+      probingUpstreamBilling.delete(account.id)
+    }
+  }
+
+  for (let start = 0; start < candidates.length; start += UPSTREAM_BILLING_PROBE_BATCH_SIZE) {
+    await Promise.all(candidates.slice(start, start + UPSTREAM_BILLING_PROBE_BATCH_SIZE).map(refreshOne))
+  }
+  await refreshUpstreamBillingSortedList(true)
 }
 
 const {
@@ -1698,6 +1755,7 @@ const refreshAccountsIncrementally = async () => {
     upstreamBillingNow.value = Date.now()
 
     await refreshTodayStatsBatch()
+    void refreshUpstreamInformation()
   } catch (error) {
     console.error('Auto refresh failed:', error)
   } finally {
@@ -1707,6 +1765,7 @@ const refreshAccountsIncrementally = async () => {
 
 const handleManualRefresh = async () => {
   await Promise.all([load(), loadUpstreamBillingProbeGlobalState()])
+  await refreshUpstreamInformation(true)
   // Force usage cells to refetch /usage on explicit user refresh.
   usageManualRefreshToken.value += 1
 }
@@ -1720,6 +1779,7 @@ const loadUpstreamBillingProbeGlobalState = async () => {
       upstreamBillingRateAbortController = null
       upstreamBillingRateETag.value = null
     }
+    if (settings.enabled) void refreshUpstreamInformation()
   } catch (error) {
     console.error('Failed to load upstream billing probe settings:', error)
   }
@@ -2534,19 +2594,24 @@ const handleProbeUpstreamBilling = async (account: Account) => {
   if (probingUpstreamBilling.has(account.id)) return
   clearUpstreamActionFeedback(upstreamBillingFeedback, upstreamBillingFeedbackTimers, account.id)
   upstreamBillingRequestErrors.delete(account.id)
+  upstreamBillingRequestErrorMessages.delete(account.id)
   probingUpstreamBilling.add(account.id)
   let feedback: UpstreamActionFeedback = 'error'
   try {
     const result = await adminAPI.accounts.probeUpstreamBilling(account.id)
     if (result.snapshot) {
       patchUpstreamBillingSnapshot(account.id, result.snapshot)
+      upstreamBillingRequestErrors.delete(account.id)
+      upstreamBillingRequestErrorMessages.delete(account.id)
       await refreshUpstreamBillingSortedList(true)
     } else {
       upstreamBillingRequestErrors.set(account.id, new Date().toISOString())
+      upstreamBillingRequestErrorMessages.set(account.id, result.error || t('admin.accounts.upstreamBilling.probeFailed'))
     }
     feedback = result.snapshot?.status === 'ok' ? 'success' : 'error'
   } catch (error) {
     upstreamBillingRequestErrors.set(account.id, new Date().toISOString())
+    upstreamBillingRequestErrorMessages.set(account.id, extractApiErrorMessage(error, t('admin.accounts.upstreamBilling.probeFailed')))
     console.error('Failed to probe upstream billing:', error)
     appStore.showError(extractApiErrorMessage(error, t('admin.accounts.upstreamBilling.probeFailed')))
   } finally {
@@ -2664,6 +2729,7 @@ const invalidateUpstreamQuotaState = (accountID?: number) => {
     upstreamQuotaFeedbackTimers.clear()
     upstreamQuotaFeedback.clear()
     upstreamBillingRequestErrors.clear()
+    upstreamBillingRequestErrorMessages.clear()
     removePersistedUpstreamQuota()
     return
   }

@@ -45,6 +45,9 @@ var (
 	ErrUpstreamQuotaIdentityChanged = infraerrors.Conflict(
 		"UPSTREAM_QUOTA_IDENTITY_CHANGED", "account identity changed during upstream quota query; retry the query",
 	)
+	ErrUpstreamQuotaNewAPICredentials = infraerrors.BadRequest(
+		"UPSTREAM_QUOTA_NEWAPI_CREDENTIALS", "NewAPI quota query requires a request URL, access token, and user ID",
+	)
 )
 
 type UpstreamQuotaQueryResult struct {
@@ -86,6 +89,8 @@ type upstreamQuotaQueryClient struct {
 	account    *Account
 	baseURL    string
 	apiKey     string
+	template   string
+	newAPIUserID string
 	proxyURL   string
 	tlsProfile *tlsfingerprint.Profile
 }
@@ -237,11 +242,24 @@ func (s *UpstreamBillingProbeService) newUpstreamQuotaQueryClient(account *Accou
 	if !isUpstreamBillingProbeAccount(account) {
 		return nil, ErrUpstreamQuotaAccountInvalid
 	}
+	template := upstreamBillingProbeTemplate(account)
 	apiKey := strings.TrimSpace(account.GetOpenAIApiKey())
+	baseURLValue := account.GetOpenAIBaseURL()
+	newAPIUserID := ""
+	if template == UpstreamBillingProbeTemplateNewAPI {
+		apiKey = strings.TrimSpace(account.GetCredential(UpstreamBillingProbeAccessTokenCredentialKey))
+		baseURLValue = account.GetCredential(UpstreamBillingProbeBaseURLCredentialKey)
+		newAPIUserID, _ = account.Extra[UpstreamBillingProbeUserIDExtraKey].(string)
+		newAPIUserID = strings.TrimSpace(newAPIUserID)
+		if apiKey == "" || strings.TrimSpace(baseURLValue) == "" || newAPIUserID == "" ||
+			strings.ContainsAny(newAPIUserID, "\r\n") || len(newAPIUserID) > 128 {
+			return nil, ErrUpstreamQuotaNewAPICredentials
+		}
+	}
 	if apiKey == "" {
 		return nil, ErrUpstreamQuotaAccountInvalid
 	}
-	baseURL, err := s.accountTestService.validateUpstreamBaseURL(account.GetOpenAIBaseURL())
+	baseURL, err := s.accountTestService.validateUpstreamBaseURL(baseURLValue)
 	if err != nil {
 		return nil, ErrUpstreamQuotaAccountInvalid
 	}
@@ -262,14 +280,26 @@ func (s *UpstreamBillingProbeService) newUpstreamQuotaQueryClient(account *Accou
 	return &upstreamQuotaQueryClient{
 		upstream:   s.accountTestService.httpUpstream,
 		account:    account,
-		baseURL:    baseURL,
-		apiKey:     apiKey,
-		proxyURL:   proxyURL,
-		tlsProfile: tlsProfile,
+		baseURL:      baseURL,
+		apiKey:       apiKey,
+		template:     template,
+		newAPIUserID: newAPIUserID,
+		proxyURL:     proxyURL,
+		tlsProfile:   tlsProfile,
 	}, nil
 }
 
 func (c *upstreamQuotaQueryClient) query(ctx context.Context) (*UpstreamQuotaInfo, error) {
+	if c.template == UpstreamBillingProbeTemplateNewAPI {
+		response, err := c.get(ctx, buildOpenAIEndpointURL(c.baseURL, "/api/user/self"), true)
+		if err != nil {
+			return nil, err
+		}
+		if err := upstreamQuotaHTTPError(response.status, true); err != nil {
+			return nil, err
+		}
+		return parseNewAPIProbeQuota(response.body)
+	}
 	response, err := c.get(ctx, buildOpenAIEndpointURL(c.baseURL, "/v1/usage"), true)
 	if err != nil {
 		return nil, err
@@ -389,8 +419,13 @@ func (c *upstreamQuotaQueryClient) getLimited(ctx context.Context, endpoint stri
 	c.account.ApplyHeaderOverrides(req.Header)
 	if authenticated {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		if c.template == UpstreamBillingProbeTemplateNewAPI {
+			req.Header.Set("New-Api-User", c.newAPIUserID)
+			req.Header.Set("User-Agent", "cc-switch/1.0")
+		}
 	} else {
 		req.Header.Del("Authorization")
+		req.Header.Del("New-Api-User")
 	}
 
 	resp, err := c.upstream.DoWithTLS(req, c.proxyURL, c.account.ID, c.account.Concurrency, c.tlsProfile)
@@ -409,6 +444,31 @@ func (c *upstreamQuotaQueryClient) getLimited(ctx context.Context, endpoint stri
 		return nil, ErrUpstreamQuotaInvalidResponse
 	}
 	return &upstreamQuotaHTTPResponse{status: resp.StatusCode, body: body}, nil
+}
+
+func parseNewAPIProbeQuota(body []byte) (*UpstreamQuotaInfo, error) {
+	data, err := parseNewAPIProbeResponse(body)
+	if err != nil {
+		return nil, ErrUpstreamQuotaInvalidResponse
+	}
+	remaining, ok := data["remaining"].(float64)
+	if !ok || !validProbeNumber(remaining) {
+		return nil, ErrUpstreamQuotaInvalidResponse
+	}
+	used, _ := data["used"].(float64)
+	total, _ := data["total"].(float64)
+	if !validProbeNumber(used) || !validProbeNumber(total) {
+		return nil, ErrUpstreamQuotaInvalidResponse
+	}
+	quota := &UpstreamQuotaInfo{
+		Provider:   "new_api",
+		Mode:       "quota",
+		Unit:       "USD",
+		Remaining:  float64Ptr(remaining),
+		Used:       float64Ptr(used),
+		Total:      float64Ptr(total),
+	}
+	return quota, nil
 }
 
 func parseSub2APIUsage(body []byte) (*UpstreamQuotaInfo, error) {

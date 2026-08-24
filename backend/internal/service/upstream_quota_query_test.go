@@ -283,6 +283,36 @@ func TestUpstreamQuotaNewAPISuccessAndUnitLookup(t *testing.T) {
 	require.NotContains(t, account.Extra, UpstreamBillingProbeExtraKey)
 }
 
+func TestUpstreamQuotaNewAPITemplateUsesDedicatedCredentials(t *testing.T) {
+	account := newUpstreamQuotaAccount(142)
+	account.Credentials[UpstreamBillingProbeBaseURLCredentialKey] = "https://newapi.example"
+	account.Credentials[UpstreamBillingProbeAccessTokenCredentialKey] = "newapi-access-token"
+	delete(account.Credentials, "api_key")
+	account.Extra[UpstreamBillingProbeTemplateExtraKey] = UpstreamBillingProbeTemplateNewAPI
+	account.Extra[UpstreamBillingProbeUserIDExtraKey] = "114514"
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	upstream := &upstreamQuotaHTTPStub{handler: func(req *http.Request) (*http.Response, error) {
+		require.Equal(t, "/api/user/self", req.URL.Path)
+		require.Equal(t, "Bearer newapi-access-token", req.Header.Get("Authorization"))
+		require.Equal(t, "114514", req.Header.Get("New-Api-User"))
+		require.Equal(t, "cc-switch/1.0", req.Header.Get("User-Agent"))
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{"success":true,"data":{"id":114514,"group":"pro","quota":1000000,"used_quota":250000}}`)),
+		}, nil
+	}}
+	svc := newUpstreamBillingProbeTestService(repo, upstream, &upstreamBillingProbeSettingRepo{})
+
+	result, err := svc.QueryAccountQuota(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.Equal(t, "new_api", result.Quota.Provider)
+	require.Equal(t, "quota", result.Quota.Mode)
+	require.Equal(t, 2.0, *result.Quota.Remaining)
+	require.Equal(t, 0.5, *result.Quota.Used)
+	require.Equal(t, 2.5, *result.Quota.Total)
+}
+
 func TestUpstreamQuotaNewAPIUnitLookupIsBestEffort(t *testing.T) {
 	tests := []struct {
 		name       string
