@@ -461,12 +461,12 @@ func parseNewAPIProbeQuota(body []byte) (*UpstreamQuotaInfo, error) {
 		return nil, ErrUpstreamQuotaInvalidResponse
 	}
 	quota := &UpstreamQuotaInfo{
-		Provider:   "new_api",
-		Mode:       "quota",
-		Unit:       "USD",
-		Remaining:  float64Ptr(remaining),
-		Used:       float64Ptr(used),
-		Total:      float64Ptr(total),
+		Provider:  "new_api",
+		Mode:      "quota",
+		Unit:      "USD",
+		Remaining: float64Ptr(remaining),
+		Used:      float64Ptr(used),
+		Total:     float64Ptr(total),
 	}
 	return quota, nil
 }
