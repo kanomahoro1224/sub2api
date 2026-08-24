@@ -85,14 +85,14 @@ type UpstreamQuotaWindow struct {
 }
 
 type upstreamQuotaQueryClient struct {
-	upstream   HTTPUpstream
-	account    *Account
-	baseURL    string
-	apiKey     string
-	template   string
+	upstream      HTTPUpstream
+	account       *Account
+	baseURL       string
+	apiKey        string
+	template      string
 	newAPIUserID string
-	proxyURL   string
-	tlsProfile *tlsfingerprint.Profile
+	proxyURL      string
+	tlsProfile    *tlsfingerprint.Profile
 }
 
 type upstreamQuotaHTTPResponse struct {

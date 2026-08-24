@@ -299,7 +299,7 @@ func TestUpstreamQuotaNewAPITemplateUsesDedicatedCredentials(t *testing.T) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     make(http.Header),
-			Body: io.NopCloser(strings.NewReader(`{"success":true,"data":{"id":114514,"group":"pro","quota":1000000,"used_quota":250000}}`)),
+			Body:       io.NopCloser(strings.NewReader(`{"success":true,"data":{"id":114514,"group":"pro","quota":1000000,"used_quota":250000}}`)),
 		}, nil
 	}}
 	svc := newUpstreamBillingProbeTestService(repo, upstream, &upstreamBillingProbeSettingRepo{})
